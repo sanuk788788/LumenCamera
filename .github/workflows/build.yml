@@ -1,0 +1,57 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack LumenCamera.zip
+        run: |
+          rm -rf _src && mkdir _src
+          unzip -q LumenCamera.zip -d _src
+          echo "PROJECT_DIR=_src/LumenCamera" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Accept Android SDK licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build release APK
+        run: |
+          cd "$PROJECT_DIR"
+          gradle :app:assembleRelease --no-daemon --console=plain
+
+      - name: Name the APK
+        run: cp "$PROJECT_DIR/app/build/outputs/apk/release/app-release.apk" Lumen-Camera.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lumen-Camera-apk
+          path: Lumen-Camera.apk
+
+      - name: Publish rolling release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete nightly --cleanup-tag --yes || true
+          gh release create nightly Lumen-Camera.apk \
+            --title "Lumen Camera (latest build)" \
+            --notes "Automatic build of ${GITHUB_SHA::7}" \
+            --prerelease --target "$GITHUB_SHA"
